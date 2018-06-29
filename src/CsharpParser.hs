@@ -9,10 +9,20 @@ import Control.Monad (join)
 type Input = String
 type Name = String
 type Body = String
-newtype Package = Package Input deriving (Show,Eq)
+newtype Modifier = Modifier [Input] deriving Eq
+newtype Package = Package Input deriving Eq
 
-data Exp = Using Package
-         | Class Name Body deriving Show
+instance Show Package where
+  show (Package n) = n
+
+data Exp = Using [Package]
+         | Namespace Package Exp
+         | Class [Name] Name Body deriving Eq
+
+instance Show Exp where
+  show (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ show p ++ ";") packages
+  show (Namespace n e) = "namespace " ++ (show n) ++ "\n{\n" ++ show e ++ show "\n}"
+  show (Class ms n b) = (join $ intersperse " " (map show ms)) ++ " " ++ " " ++ n ++ "\n{\n" ++ b ++ "\n}"
 
 csharpStyle   :: LanguageDef st
 csharpStyle =
@@ -43,12 +53,11 @@ usings = many using
     using = reserved "using" >> Package <$> package <* semi
 
 namespace :: Parsec Input () a -> Parsec Input () a
-namespace body = reserved "namespace" *> package *> braces body
+namespace c = reserved "namespace" *> package *> braces c
 
 classP :: Parsec Input () Exp
 classP = do
-  try $ reserved "public"
-  try $ reserved "private"
+  try $ (reserved "public" <|> reserved "private")
   reserved "class"
   className <- identifier
   b <- braces body
