@@ -13,9 +13,31 @@ build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
 
-executable csharp-parse
+library
   hs-source-dirs:      src
+  exposed-modules:     CSharpParser
+  build-depends:       base >= 4.7 && < 5
+                     , parsec
+  ghc-options:         -Wall
+  default-language:    Haskell2010
+
+
+executable csharp-parser
+  hs-source-dirs:      bin
   main-is:             Main.hs
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
-                     , parsec
+                     , csharp-parse
+  ghc-options:         -Wall
+
+
+test-suite spec
+   build-depends:       base >= 4.7 && < 5
+                      , hspec >= 2.2 && < 3.0
+                      , csharp-parse
+                      , parsec
+   type : exitcode-stdio-1.0
+   hs-source-dirs:      tests
+   main-is:             Test.hs
+   default-language:    Haskell2010
+   ghc-options:         -Wall

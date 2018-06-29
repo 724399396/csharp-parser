@@ -1,0 +1,22 @@
+        public class when_missing_items_received_date_is_valid
+        {
+            Establish context = () =>
+            {
+                CreateSetting(PracticeType.Tax);
+                missingItems = MissingItemBuilder.Create(new List<MissingItem>()
+                {
+                    new MissingItem(workRecord.Id, "from", "description", DateTime.UtcNow.AddDays(-1))
+                });
+            };
+
+            Because mark_as_received = () =>
+            {
+                missingItemUris = missingItems.Select(t => t.ToUri(linker)).ToList();
+                var receiveDate = DateTime.UtcNow.ToIsoDateString();
+                receiveMissingItemRequest = new ReceiveMissingItemsRequest { MissingItemUris = missingItemUris, ReceiveDate = receiveDate };
+                PutByRel<Rels.WorkRecord>(r => r.MissingItemReceived, new { workRecordId = workRecord.Id },
+                    receiveMissingItemRequest);
+            };
+
+            It should_return_no_content = () =>  Response.ShouldReturnNoContent();
+        }
