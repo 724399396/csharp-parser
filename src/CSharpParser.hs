@@ -56,25 +56,40 @@ data CSharp = CSharp Using Namespace deriving (Eq, Show)
 csharpStyle   :: LanguageDef st
 csharpStyle =
   javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly", "const"]
-            , T.reservedOpNames = ["+", "-", "*", "/", "=>"]
+            , T.reservedOpNames = ["+", "-", "*", "/", "=>", "."]
             }
 
 lexer :: T.TokenParser ()
 lexer = T.makeTokenParser csharpStyle
 
+identifier :: CParser String
 identifier = T.identifier lexer
+dot :: CParser String
 dot = T.dot lexer
+reserved :: String -> CParser ()
 reserved = T.reserved lexer
+semi :: CParser String
 semi = T.semi lexer
+braces :: CParser a -> CParser a
 braces = T.braces lexer
+reservedOp :: String -> CParser ()
 reservedOp = T.reservedOp lexer
+parens :: CParser a -> CParser a
 parens = T.parens lexer
+symbol :: String -> CParser String
 symbol = T.symbol lexer
+comma :: CParser String
 comma = T.comma lexer
+charLiteral :: CParser Char
 charLiteral = T.charLiteral lexer
+stringLiteral :: CParser String
 stringLiteral = T.stringLiteral lexer
+naturalOrFloat :: CParser (Either Integer Double)
 naturalOrFloat = T.naturalOrFloat lexer
+colon :: CParser String
 colon = T.colon lexer
+operator :: CParser String
+operator = T.operator lexer
 
 package :: CParser Package
 package = (Package . join . intersperse ".") <$> sepBy1 identifier dot
@@ -137,7 +152,7 @@ statements = many statement
   where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression <* semi)
 
 expression :: CParser Expression
-expression = ((Expression <$> sepBy1 atom dot) <|> lambda)
+expression = ((Expression <$> sepBy1 atom operator) <|> lambda)
 
 atom :: CParser Atom
 atom = try methodCall
@@ -145,7 +160,6 @@ atom = try methodCall
        <|> try (stringLiteral >>= return . Literal . show)
        <|> try (naturalOrFloat >>= return . Literal . either show show)
        <|> (Elem <$> identifier)
-       <|> (choice $ map (\x -> reservedOp x >> return (Op x)) ["+","-","*","/"])
 
 methodCall :: CParser Atom
 methodCall = do i <- identifier

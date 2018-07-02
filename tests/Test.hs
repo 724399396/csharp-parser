@@ -101,3 +101,39 @@ main = hspec $ do
       parse expression "" "MethodA()" `shouldBe` Right (Expression [MethodCall "MethodA" (Expression [])])
     it "should parse multiple level method call" $ do
       parse expression "" "instanceA.MethodB().MethodC(instanceB)" `shouldBe` Right (Expression [Elem "instanceA", MethodCall "MethodB" (Expression []), MethodCall "MethodC" (Expression [Elem "instanceB"])])
+
+  describe "parse atom" $ do
+    it "should parse method" $ do
+      parse atom "" "MethodA()" `shouldeBe` Right (MethodCall "MethodA" (Expression []))
+    it "should parse char literal" $ do
+      parse atom "" "'a'" `shouldBe` Right (Literal "'a'")
+    it "should parse string literal" $ do
+      parse atom "" "\"a\"" `shouldBe` Right (Literal "\"a\"")
+    it "should parse integer" $ do
+      parse atom "" "1" `shouldBe` Right (Literal "1")
+    it "should parse float" $ do
+      parse atom "" "1.0" `shouldBe` Right (Literal "1.0")
+    it "temporary not support long mark" $ do
+      parse (atom >> eof) "" "1l" `shouldSatisfy` isFailure
+    it "should parse identifier" $ do
+      parse atom "" "Date" `shouldbe` Right (Elem "Date")
+
+  describe "parse method call" $ do
+    it "should parse without parameter" $ do
+      parse methodCall "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" (Expression []))
+    it "should parse with parameter" $ do
+      parse methodCall "" "MethodB(3)" `shouldBe` Right (MethodCall "MethodB" (Expression [Literal "3"]))
+
+  describe "parse lambda" $ do
+    it "should parse no argument and no body lambda" $ do
+      parse lambda "" "() => {}" `shouldBe` Right (Lambda [] [])
+    it "should parse one argument without parens" $ do
+      parse lambda "" "arg => {}" `shouldBe` Right (Lambda ["arg"] [])
+    it "should parse one argument with parens" $ do
+      parse lambda "" "(arg) => {}" `shouldBe` Right (Lambda ["arg"] [])
+    it "should parse multiple arguments with parens" $ do
+      parse lambda "" "(arg1, arg2) => {}" `shouldBe` Right (Lambda ["arg1", "arg2"] [])
+    it "should fail when multiple parameter no parens" $ do
+      parse lambda "" "arg1, arg2 => {}" `shouldSatisfy` isFailure
+    it "should success a single stentance" $ do
+      parse lambda "" "() => 1;" `shouldBe` Right (Lambda [] [Literal "1"])
