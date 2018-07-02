@@ -1,109 +1,149 @@
-module CSharpParser (usings, Package (..)) where
+module CSharpParser (package, using, namespace, classP, Package (..), Using (..), Namespace (..), Class (..), Modifier (..)) where
 
-import Text.Parsec
-import qualified Text.Parsec.Token as T
-import Text.Parsec.Language (LanguageDef, javaStyle)
-import Data.List (intersperse)
-import Control.Monad (join)
+import           Control.Monad        (join)
+import           Text.Parsec
+import           Text.Parsec.Language (LanguageDef, javaStyle)
+import qualified Text.Parsec.Token    as T
 
 type Input = String
 type Name = String
-type Body = String
-newtype Modifier = Modifier [Input] deriving Eq
-newtype Package = Package Input deriving Eq
+type Type = String
+type Arg = String
+type Parent = String
+type CParser a = Parsec Input () a
+newtype Modifier = Modifier [Input] deriving (Eq, Show)
+newtype Package = Package Input deriving (Eq, Show)
 
-instance Show Package where
-  show (Package n) = n
+-- instance Show Modifier where
+--   show (Modifier is) = join $ intersperse " " is
 
-data Exp = Using [Package]
-         | Namespace Package Exp
-         | Class [Name] Name Body deriving Eq
+-- instance Show Package where
+--   show (Package n) = n
 
-instance Show Exp where
-  show (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ show p ++ ";") packages
-  show (Namespace n e) = "namespace " ++ (show n) ++ "\n{\n" ++ show e ++ show "\n}"
-  show (Class ms n b) = (join $ intersperse " " (map show ms)) ++ " " ++ " " ++ n ++ "\n{\n" ++ b ++ "\n}"
+data Using = Using [Package] deriving (Eq, Show)
+data Namespace = Namespace Package [Class] deriving (Eq, Show)
+
+-- instance Show Using where
+--   show (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ show p ++ ";") packages
+
+-- instance Show Namespace where
+--   show (Namespace n e) = "namespace " ++ (show n) ++ "\n{\n" ++ show e ++ show "\n}"
+
+data Class = Class Modifier Name [Parent] [Statement] deriving (Eq, Show)
+
+-- instance Show Class where
+--   show (Class ms n p b) = show ms ++ " " ++ n ++ "\n{\n" ++ (show b) ++ "\n}"
+
+data Statement = VarDecl Type Name
+               | VarDeclAndAssign Type Name Expression
+               | VarAssign Name Expression
+               | Exp Expression
+               | Lambda [Arg] [Statement]
+  deriving (Eq, Show)
+
+data Expression = Expression [Atom] deriving (Eq, Show)
+
+data Atom = Elem Name
+          | MethodCall Name Expression
+          | Op String
+          deriving (Eq, Show)
+
+data CSharp = CSharp Using Namespace deriving (Eq, Show)
 
 csharpStyle   :: LanguageDef st
 csharpStyle =
-  javaStyle {T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly"]}
+  javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly"]
+            , T.reservedOpNames = ["+", "-", "*", "/", "=>"]
+            }
 
 lexer :: T.TokenParser ()
 lexer = T.makeTokenParser csharpStyle
 
-identifier :: Parsec String () String
 identifier = T.identifier lexer
-dot :: Parsec String () String
 dot = T.dot lexer
-reserved :: String -> Parsec String () ()
 reserved = T.reserved lexer
-semi :: Parsec String () String
 semi = T.semi lexer
-braces :: Parsec String () a -> Parsec String () a
 braces = T.braces lexer
-reservedOp :: String -> Parsec String () ()
 reservedOp = T.reservedOp lexer
+parens = T.parens lexer
+symbol = T.symbol lexer
+comma = T.comma lexer
 
-package :: Parsec String () String
-package = (join . intersperse ".") <$> sepBy identifier dot
+package :: CParser Package
+package = (Package . join) <$> many1 (identifier <|> dot)
 
-usings :: Parsec Input () [Package]
-usings = many using
+using :: CParser Using
+using = Using <$> many singleUsing
   where
-    using = reserved "using" >> Package <$> package <* semi
+    singleUsing = reserved "using" >> package <* semi
 
-namespace :: Parsec Input () a -> Parsec Input () a
-namespace c = reserved "namespace" *> package *> braces c
+namespace :: CParser Namespace
+namespace = do
+  reserved "namespace"
+  n <- package
+  b <- braces (many classP)
+  eof
+  return $ Namespace n b
 
-classP :: Parsec Input () Exp
+classP :: CParser Class
 classP = do
-  try $ (reserved "public" <|> reserved "private")
+  modifier <- many $ choice $ map (\x -> reserved x >> return x) ["public", "private", "static"]
   reserved "class"
   className <- identifier
-  b <- braces body
-  return $ Class className b
+  parents <- option [] (reservedOp ":" >> sepBy1 identifier comma)
+  statements' <- braces statements
+  return $ Class (Modifier modifier) className parents statements'
 
 -- body = many (noneOf "}")
 
-typeP :: Parsec Input () ()
-typeP = try (reserved "var") <|> (identifier >> return ())
+typeP :: CParser Input
+typeP = try (reserved "var" >> return "var") <|> identifier
 
-variableDeclare :: Parsec Input () String
-variableDeclare = typeP *> identifier
+variableDeclare :: CParser Statement
+variableDeclare = VarDecl <$> typeP <*> identifier <* semi
 
-variableDeclareAndAssign :: Parsec Input () ()
+variableDeclareAndAssign :: CParser Statement
 variableDeclareAndAssign = do
-  v <- variableDeclare
+  (VarDecl t n) <- variableDeclare
   _ <- reservedOp "="
   e <- expression
-  return ()
+  return $ VarDeclAndAssign t n e
 
-body :: a
-body = undefined
+variableAssign :: CParser Statement
+variableAssign = do
+  v <- identifier
+  _ <- reservedOp "="
+  e <- expression
+  return $ VarAssign v e
 
-methodCall :: Parsec Input () Exp
-methodCall = undefined
+statement :: CParser Statement
+statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression) <|> lambda
 
-expression :: Parsec Input () Exp
-expression = undefined
+statements :: CParser [Statement]
+statements = many statement
 
--- lambda :: Parsec Input ParseInfomation Exp
--- lambda = do
---   spaces
---   string "()"
---   spaces
---   string "=>"
---   spaces
---   try $ char '{'
---   spaces
---   b <-
---   try $ char '}'
---   spaces
---   char ';'
---   return b
+expression :: CParser Expression
+expression = Expression <$> many1 atom <* semi
 
--- declare :: Parsec Input ClassNest Exp
--- declare = do
---   skipMany (letter <|> space)
---   char '='
---   lambda
+atom :: CParser Atom
+atom = try methodCall <|> (Elem <$> identifier) <|> (choice $ map (\x -> reservedOp x >> return (Op x)) ["+","-","*","/"])
+
+methodCall :: CParser Atom
+methodCall = do i <- identifier
+                p  <- parens expression
+                return $ MethodCall i p
+
+lambda :: CParser Statement
+lambda = do args' <- args
+            _ <- reservedOp "=>"
+            s' <- ((:[]) <$> statement) <|> statements
+            return $ Lambda args' s'
+  where args :: CParser [Arg]
+        args = try (symbol "(" *> symbol ")" *> return [])
+               <|> (\x -> [x]) <$> try identifier
+               <|> parens (sepBy1 identifier comma)
+
+csharp :: CParser CSharp
+csharp = do using' <- using
+            namespace' <- namespace
+            return $ CSharp using' namespace'
