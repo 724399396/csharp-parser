@@ -1,6 +1,7 @@
-module CSharpParser (package, using, namespace, classP, Package (..), Using (..), Namespace (..), Class (..), Modifier (..)) where
+module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..)) where
 
 import           Control.Monad        (join)
+import           Data.List (intersperse)
 import           Text.Parsec
 import           Text.Parsec.Language (LanguageDef, javaStyle)
 import qualified Text.Parsec.Token    as T
@@ -34,25 +35,27 @@ data Class = Class Modifier Name [Parent] [Statement] deriving (Eq, Show)
 -- instance Show Class where
 --   show (Class ms n p b) = show ms ++ " " ++ n ++ "\n{\n" ++ (show b) ++ "\n}"
 
-data Statement = VarDecl Type Name
-               | VarDeclAndAssign Type Name Expression
+data Statement = VarDecl Modifier Type [Name]
+               | VarDeclAndAssign Modifier Type [Name] Expression
                | VarAssign Name Expression
                | Exp Expression
-               | Lambda [Arg] [Statement]
   deriving (Eq, Show)
 
-data Expression = Expression [Atom] deriving (Eq, Show)
+data Expression = Expression [Atom]
+                | Lambda [Arg] [Statement]
+                deriving (Eq, Show)
 
 data Atom = Elem Name
           | MethodCall Name Expression
           | Op String
+          | Literal String
           deriving (Eq, Show)
 
 data CSharp = CSharp Using Namespace deriving (Eq, Show)
 
 csharpStyle   :: LanguageDef st
 csharpStyle =
-  javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly"]
+  javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly", "const"]
             , T.reservedOpNames = ["+", "-", "*", "/", "=>"]
             }
 
@@ -68,9 +71,13 @@ reservedOp = T.reservedOp lexer
 parens = T.parens lexer
 symbol = T.symbol lexer
 comma = T.comma lexer
+charLiteral = T.charLiteral lexer
+stringLiteral = T.stringLiteral lexer
+naturalOrFloat = T.naturalOrFloat lexer
+colon = T.colon lexer
 
 package :: CParser Package
-package = (Package . join) <$> many1 (identifier <|> dot)
+package = (Package . join . intersperse ".") <$> sepBy1 identifier dot
 
 using :: CParser Using
 using = Using <$> many singleUsing
@@ -90,53 +97,65 @@ classP = do
   modifier <- many $ choice $ map (\x -> reserved x >> return x) ["public", "private", "static"]
   reserved "class"
   className <- identifier
-  parents <- option [] (reservedOp ":" >> sepBy1 identifier comma)
+  parents <- option [] (colon >> sepBy1 identifier comma)
   statements' <- braces statements
   return $ Class (Modifier modifier) className parents statements'
 
 -- body = many (noneOf "}")
 
 typeP :: CParser Input
-typeP = try (reserved "var" >> return "var") <|> identifier
+typeP = try (reserved "var" >> return "var") <|> ((join . intersperse ".") <$> sepBy1 identifier dot)
+
+variableDeclareHelp :: CParser Statement
+variableDeclareHelp = do
+  m' <- many (choice $ map (\x -> reserved x >> return x) ["readonly","private","public","protected","const","static"])
+  t' <- typeP
+  vs' <- sepBy1 identifier comma
+  return $ VarDecl (Modifier m') t' vs'
 
 variableDeclare :: CParser Statement
-variableDeclare = VarDecl <$> typeP <*> identifier <* semi
+variableDeclare = variableDeclareHelp <* semi
 
 variableDeclareAndAssign :: CParser Statement
 variableDeclareAndAssign = do
-  (VarDecl t n) <- variableDeclare
+  (VarDecl m t v) <- variableDeclareHelp
   _ <- reservedOp "="
   e <- expression
-  return $ VarDeclAndAssign t n e
+  _ <- semi
+  return $ VarDeclAndAssign m t v e
 
 variableAssign :: CParser Statement
 variableAssign = do
   v <- identifier
   _ <- reservedOp "="
   e <- expression
+  _ <- semi
   return $ VarAssign v e
-
-statement :: CParser Statement
-statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression) <|> lambda
 
 statements :: CParser [Statement]
 statements = many statement
+  where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression <* semi)
 
 expression :: CParser Expression
-expression = Expression <$> many1 atom <* semi
+expression = ((Expression <$> sepBy1 atom dot) <|> lambda)
 
 atom :: CParser Atom
-atom = try methodCall <|> (Elem <$> identifier) <|> (choice $ map (\x -> reservedOp x >> return (Op x)) ["+","-","*","/"])
+atom = try methodCall
+       <|> try (charLiteral >>= return . Literal . show)
+       <|> try (stringLiteral >>= return . Literal . show)
+       <|> try (naturalOrFloat >>= return . Literal . either show show)
+       <|> (Elem <$> identifier)
+       <|> (choice $ map (\x -> reservedOp x >> return (Op x)) ["+","-","*","/"])
 
 methodCall :: CParser Atom
 methodCall = do i <- identifier
                 p  <- parens expression
                 return $ MethodCall i p
 
-lambda :: CParser Statement
+lambda :: CParser Expression
 lambda = do args' <- args
             _ <- reservedOp "=>"
-            s' <- ((:[]) <$> statement) <|> statements
+            s' <- try (braces statements) <|> statements
             return $ Lambda args' s'
   where args :: CParser [Arg]
         args = try (symbol "(" *> symbol ")" *> return [])

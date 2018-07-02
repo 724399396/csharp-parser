@@ -42,5 +42,62 @@ main = hspec $ do
     it "should fail when no braces" $ do
       parse classP "" "class A" `shouldSatisfy` isFailure
 
+  describe "parse type" $ do
+    it "should parse var" $ do
+      parse typeP "" "var" `shouldBe` Right "var"
+    it "should parse explicit type" $ do
+      parse typeP "" "Date" `shouldBe` Right "Date"
+    it "should parse explicit type with full name" $ do
+      parse typeP "" "System.Linq.IQueryable" `shouldBe` Right "System.Linq.IQueryable"
 
 
+  describe "parse variable declare" $ do
+    it "should parse single value declare" $ do
+      parse variableDeclare "" "int a;" `shouldBe` Right (VarDecl (Modifier []) "int" ["a"])
+    it "should parse value with const modifier" $ do
+      parse variableDeclare "" "const long b;" `shouldBe` Right (VarDecl (Modifier ["const"]) "long" ["b"])
+    it "should parse value with static modifier" $ do
+      parse variableDeclare "" "static long c;" `shouldBe` Right (VarDecl (Modifier ["static"]) "long" ["c"])
+    it "should parse multiple value with comma seperate" $ do
+      parse variableDeclare "" "int d,e;" `shouldBe` Right (VarDecl (Modifier []) "int" ["d","e"])
+    it "should fail when no semi" $ do
+      parse variableDeclare "" "int a" `shouldSatisfy` isFailure
+
+
+  describe "parse variable declare and assign" $ do
+    it "should parse single value declare" $ do
+      parse variableDeclareAndAssign "" "int a = 3;" `shouldBe` Right (VarDeclAndAssign (Modifier []) "int" ["a"] (Expression [Literal "3"]))
+    it "should parse value with const modifier" $ do
+      parse variableDeclareAndAssign "" "const long b = 4;" `shouldBe` Right (VarDeclAndAssign (Modifier ["const"]) "long" ["b"] (Expression [Literal "4"]))
+    it "should parse value with static modifier" $ do
+      parse variableDeclareAndAssign "" "static char c = 'c';" `shouldBe` Right (VarDeclAndAssign (Modifier ["static"]) "char" ["c"] (Expression [Literal "'c'"]))
+    it "should parse multiple value with comma seperate" $ do
+      parse variableDeclareAndAssign "" "string d,e = \"abc\";" `shouldBe` Right (VarDeclAndAssign (Modifier []) "string" ["d","e"] (Expression [Literal "\"abc\""]))
+    it "should fail when no semi" $ do
+      parse variableDeclareAndAssign "" "int a = 1" `shouldSatisfy` isFailure
+
+  describe "parse variable assign" $ do
+    it "should parse value assign" $ do
+      parse variableAssign "" "a = 3;" `shouldBe` Right (VarAssign "a" (Expression [Literal "3"]))
+    it "should fail when no semi" $ do
+      parse variableAssign "" "a = 1" `shouldSatisfy` isFailure
+    it "temporary not support multiple '='" $ do
+      parse variableAssign "" "a = b = 3" `shouldSatisfy` isFailure
+
+  describe "parse statements" $ do
+    it "should support empty statements" $ do
+      parse statements "" "" `shouldBe` Right []
+    it "should parse variableDeclare, variableAssign, variableDeclareAndAssign, expression and lambda" $ do
+      parse statements "" "int a; a = 1; int b = 2;Console.WriteLine();var c = () => {};" `shouldBe` Right ([VarDecl (Modifier []) "int" ["a"]
+                                                                                                            , VarAssign "a" (Expression [Literal "1"])
+                                                                                                            , VarDeclAndAssign (Modifier []) "int" ["b"] (Expression [Literal "2"])
+                                                                                                           , Exp (Expression [Elem "Console", MethodCall "WriteLine" (Expression [])])
+                                                                                                           , Exp (Lambda [] [])])
+    it "should fail when miss semi" $ do
+      parse statements "" "Console.WriteLine" `shouldSatisfy` isFailure
+
+  describe "parse expression" $ do
+    it "should parse directy method call" $ do
+      parse expression "" "MethodA()" `shouldBe` Right (Expression [MethodCall "MethodA" (Expression [])])
+    it "should parse multiple level method call" $ do
+      parse expression "" "instanceA.MethodB().MethodC(instanceB)" `shouldBe` Right (Expression [Elem "instanceA", MethodCall "MethodB" (Expression []), MethodCall "MethodC" (Expression [Elem "instanceB"])])
