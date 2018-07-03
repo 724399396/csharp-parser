@@ -1,4 +1,4 @@
-module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, methodCall, atom, lambda, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..)) where
+module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, methodCall, atom, lambda, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..), CParser) where
 
 import           Control.Monad        (join)
 import           Data.List (intersperse)
@@ -13,7 +13,7 @@ type Arg = String
 type Parent = String
 type CParser a = Parsec Input () a
 newtype Modifier = Modifier [Input] deriving (Eq, Show)
-newtype Package = Package Input deriving (Eq, Show)
+data Package = Package (Maybe Input) Input deriving (Eq, Show)
 
 -- instance Show Modifier where
 --   show (Modifier is) = join $ intersperse " " is
@@ -22,7 +22,7 @@ newtype Package = Package Input deriving (Eq, Show)
 --   show (Package n) = n
 
 data Using = Using [Package] deriving (Eq, Show)
-data Namespace = Namespace Package [Class] deriving (Eq, Show)
+data Namespace = Namespace Name [Class] deriving (Eq, Show)
 
 -- instance Show Using where
 --   show (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ show p ++ ";") packages
@@ -56,7 +56,7 @@ data CSharp = CSharp Using Namespace deriving (Eq, Show)
 csharpStyle   :: LanguageDef st
 csharpStyle =
   javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly", "const"]
-            , T.reservedOpNames = ["+", "-", "*", "/", "=>", "."]
+            , T.reservedOpNames = ["+", "-", "*", "/"]
             }
 
 lexer :: T.TokenParser ()
@@ -90,14 +90,16 @@ colon :: CParser String
 colon = T.colon lexer
 operator :: CParser String
 operator = T.operator lexer
+angles :: CParser a -> CParser a
+angles = T.angles lexer
 
-package :: CParser Package
-package = (Package . join . intersperse ".") <$> sepBy1 identifier dot
+package :: CParser Input
+package = (join . intersperse ".") <$> sepBy1 identifier dot
 
 using :: CParser Using
 using = Using <$> many singleUsing
   where
-    singleUsing = reserved "using" >> package <* semi
+    singleUsing = reserved "using" >> Package <$> (option Nothing (Just <$> try (identifier <* reservedOp "="))) <*> package <* semi <?> "expect using"
 
 namespace :: CParser Namespace
 namespace = do
@@ -111,15 +113,17 @@ classP :: CParser Class
 classP = do
   modifier <- many $ choice $ map (\x -> reserved x >> return x) ["public", "private", "static"]
   reserved "class"
-  className <- identifier
-  parents <- option [] (colon >> sepBy1 identifier comma)
+  className' <- className
+  parents <- option [] (colon >> sepBy1 className comma)
   statements' <- braces statements
-  return $ Class (Modifier modifier) className parents statements'
+  return $ Class (Modifier modifier) className' parents statements'
+  where
+    className = (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles identifier)) <?> "expect class"
 
 -- body = many (noneOf "}")
 
 typeP :: CParser Input
-typeP = try (reserved "var" >> return "var") <|> ((join . intersperse ".") <$> sepBy1 identifier dot)
+typeP = try (reserved "var" >> return "var") <|> ((join . intersperse ".") <$> sepBy1 identifier dot) <?> "expect type declare"
 
 variableDeclareHelp :: CParser Statement
 variableDeclareHelp = do
@@ -149,10 +153,10 @@ variableAssign = do
 
 statements :: CParser [Statement]
 statements = many statement
-  where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression <* semi)
+  where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> (Exp <$> expression <* semi) <?> "expect statement"
 
 expression :: CParser Expression
-expression = try lambda <|> Expression <$> sepBy1 atom operator
+expression = try lambda <|> Expression <$> sepBy atom operator <?> "expect expression"
 
 atom :: CParser Atom
 atom = try methodCall
@@ -160,6 +164,7 @@ atom = try methodCall
        <|> try (stringLiteral >>= return . Literal . show)
        <|> try (naturalOrFloat >>= return . Literal . either show show)
        <|> (Elem <$> identifier)
+       <?> "expect atom"
 
 methodCall :: CParser Atom
 methodCall = do i <- identifier

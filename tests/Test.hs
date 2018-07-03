@@ -6,25 +6,30 @@ isFailure :: Either a b -> Bool
 isFailure (Left _) = True
 isFailure _ = False
 
+shouldSuccess :: (HasCallStack, Show a, Eq a) => (CParser a, String) -> a -> Expectation
+shouldSuccess (p,i) e = parse p "" i `shouldBe` Right e
+
 main :: IO ()
 main = hspec $ do
   describe "parse package" $ do
     it "should parse no dot package name" $ do
-      parse package "" "System" `shouldBe` Right (Package "System")
+      (package, "System") `shouldSuccess` "System"
     it "should parse dot split pckage name" $ do
-      parse package "" "System.Linq" `shouldBe` Right (Package "System.Linq")
+      (package, "System.Linq") `shouldSuccess` "System.Linq"
 
   describe "parse using" $ do
     it "should parse single line using" $ do
-      parse using "" "using System;" `shouldBe` Right (Using [Package "System"])
+      parse using "" "using System;" `shouldBe` Right (Using [Package Nothing "System"])
     it "should parse multiple line using" $ do
-      parse using "" "using System.Linq;\n\tusing System; " `shouldBe` Right (Using [Package "System.Linq", Package "System"])
+      parse using "" "using System.Linq;\n\tusing System; " `shouldBe` Right (Using [Package Nothing "System.Linq", Package Nothing "System"])
+    it "should support alias using" $ do
+      parse using "" "using Countries = Test.Basic.Fixtures.DummyCountry.Countries;" `shouldBe` Right (Using [Package (Just "Countries") "Test.Basic.Fixtures.DummyCountry.Countries"])
     it "should fail when no semi" $ do
       parse using "" "using System.Linq" `shouldSatisfy` isFailure
 
   describe "parse namespace" $ do
     it "should parse namespace with underscore" $ do
-      parse namespace "" "namespace Test.ResourceTests.search_api{}" `shouldBe` Right (Namespace (Package "Test.ResourceTests.search_api") [])
+      parse namespace "" "namespace Test.ResourceTests.search_api{}" `shouldBe` Right (Namespace "Test.ResourceTests.search_api" [])
     it "should fail when has input not consume" $ do
       parse namespace "" "namespace Test.ResourceTests.search_api{}n" `shouldSatisfy` isFailure
 
@@ -37,6 +42,11 @@ main = hspec $ do
       parse classP "" "class A : Parent{}" `shouldBe` Right (Class (Modifier []) "A" ["Parent"] [])
     it "should parse class with parents" $ do
       parse classP "" "class A : Parent1, Parent2{}" `shouldBe` Right (Class (Modifier []) "A" ["Parent1", "Parent2"] [])
+    it "should parse class with generic type" $ do
+      (classP, "class ClassA<Controller>{}") `shouldSuccess` Class (Modifier []) "ClassA<Controller>" [] []
+    it "should parse class with parent generic type" $ do
+      (classP, "class ClassA : Parent<Controller>{}") `shouldSuccess` Class (Modifier []) "ClassA" ["Parent<Controller>"] []
+
     it "should fail when no word 'class'" $ do
       parse classP "" "private A{}" `shouldSatisfy` isFailure
     it "should fail when no braces" $ do
@@ -92,7 +102,7 @@ main = hspec $ do
                                                                                                             , VarAssign "a" (Expression [Literal "1"])
                                                                                                             , VarDeclAndAssign (Modifier []) "int" ["b"] (Expression [Literal "2"])
                                                                                                            , Exp (Expression [Elem "Console", MethodCall "WriteLine" (Expression [])])
-                                                                                                           , Exp (Lambda [] [])])
+                                                                                                           , VarDeclAndAssign (Modifier []) "var" ["c"] (Lambda [] [])])
     it "should fail when miss semi" $ do
       parse statements "" "Console.WriteLine" `shouldSatisfy` isFailure
 
@@ -123,6 +133,8 @@ main = hspec $ do
       parse methodCall "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" (Expression []))
     it "should parse with parameter" $ do
       parse methodCall "" "MethodB(3)" `shouldBe` Right (MethodCall "MethodB" (Expression [Literal "3"]))
+    it "should parse with generic" $ do
+      (methodCall, "MethodA<Generic>()") `shouldSuccess` (MethodCall "MethodA" (Just "Generic") (Expression []))
 
   describe "parse lambda" $ do
     it "should parse no argument and no body lambda" $ do
