@@ -1,4 +1,4 @@
-module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..)) where
+module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, methodCall, atom, lambda, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..)) where
 
 import           Control.Monad        (join)
 import           Data.List (intersperse)
@@ -152,7 +152,7 @@ statements = many statement
   where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> try (Exp <$> expression <* semi)
 
 expression :: CParser Expression
-expression = ((Expression <$> sepBy1 atom operator) <|> lambda)
+expression = try lambda <|> Expression <$> sepBy1 atom operator
 
 atom :: CParser Atom
 atom = try methodCall

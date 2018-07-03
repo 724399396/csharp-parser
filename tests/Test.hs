@@ -104,7 +104,7 @@ main = hspec $ do
 
   describe "parse atom" $ do
     it "should parse method" $ do
-      parse atom "" "MethodA()" `shouldeBe` Right (MethodCall "MethodA" (Expression []))
+      parse atom "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" (Expression []))
     it "should parse char literal" $ do
       parse atom "" "'a'" `shouldBe` Right (Literal "'a'")
     it "should parse string literal" $ do
@@ -116,7 +116,7 @@ main = hspec $ do
     it "temporary not support long mark" $ do
       parse (atom >> eof) "" "1l" `shouldSatisfy` isFailure
     it "should parse identifier" $ do
-      parse atom "" "Date" `shouldbe` Right (Elem "Date")
+      parse atom "" "Date" `shouldBe` Right (Elem "Date")
 
   describe "parse method call" $ do
     it "should parse without parameter" $ do
@@ -136,4 +136,4 @@ main = hspec $ do
     it "should fail when multiple parameter no parens" $ do
       parse lambda "" "arg1, arg2 => {}" `shouldSatisfy` isFailure
     it "should success a single stentance" $ do
-      parse lambda "" "() => 1;" `shouldBe` Right (Lambda [] [Literal "1"])
+      parse lambda "" "() => 1;" `shouldBe` Right (Lambda [] [Exp $ Expression $ [Literal "1"]])
