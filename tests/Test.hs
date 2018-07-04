@@ -142,6 +142,9 @@ main = hspec $ do
       (methodCall, "MethodB(3, () => {})") `shouldSuccess` MethodCall "MethodB" [Expression [Literal "3"], Lambda [] []]
     it "should parse with generic" $ do
       (methodCall, "MethodA<Generic>()") `shouldSuccess` MethodCall "MethodA<Generic>" [Expression []]
+    it "should parse with dot sep genric" $ do
+      (methodCall, "MethodA<InstanceA.B>()") `shouldSuccess` MethodCall "MethodA<InstanceA.B>" [Expression []]
+
 
   describe "parse lambda" $ do
     it "should parse no argument and no body lambda" $ do

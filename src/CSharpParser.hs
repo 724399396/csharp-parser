@@ -169,7 +169,7 @@ atom = try newInstance
 
 
 methodCall :: CParser Atom
-methodCall = do i <- (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles identifier)) <?> "expect method"
+methodCall = do i <- (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles package)) <?> "expect method"
                 p  <- parens (commaSep expression)
                 return $ MethodCall i p
 
