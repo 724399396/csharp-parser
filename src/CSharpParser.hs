@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module CSharpParser (package, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, methodCall, atom, lambda, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..), CParser) where
 
 import           Control.Monad        (join)
@@ -147,7 +149,7 @@ statements :: CParser [Statement]
 statements = many statement
 
 expression :: CParser Expression
-expression = try lambda <|> Expression <$> sepBy atom operator <?> "expect expression"
+expression = try lambda <|> Expression <$> many atom <?> "expect expression"
 
 atom :: CParser Atom
 atom = try newInstance
@@ -156,8 +158,9 @@ atom = try newInstance
        <|> try (stringLiteral >>= return . Literal . show)
        <|> try (naturalOrFloat >>= return . Literal . either show show)
        <|> (Elem <$> identifier)
+       <|> (Op <$> operator)
        <?> "expect atom"
-  where newInstance e= do
+  where newInstance = do
           reserved "new"
           className' <- (className <|> (reserved "[]" >> return "[]"))
           parameters' <- option [] (parens (commaSep expression))
@@ -181,7 +184,7 @@ lambda = do args' <- args
                <|> parens (sepBy1 identifier comma)
 
 csharp :: CParser CSharp
-csharp = do using' D<- using
+csharp = do using' <- using
             namespace' <- namespace
             return $ CSharp using' namespace'
 
@@ -206,27 +209,29 @@ instance OriginFormat Namespace where
 
 instance OriginFormat Class where
   originFormat (Class ms n [] b) =  originFormat ms ++ " " ++ n ++ "\n{\n" ++ (originFormatList b "\n") ++ "\n}"
-  originFormat (Class ms n xs b) =  originFormat ms ++ " " ++ n ++ ":" ++ (intersperse ", " xs) ++ "\n{\n" ++ (originFormatList b "\n") ++ "\n}"
+  originFormat (Class ms n xs b) =  originFormat ms ++ " " ++ n ++ " : " ++ (join $ intersperse ", " xs) ++ "\n{\n" ++ (originFormatList b "\n") ++ "\n}"
 
 instance OriginFormat Modifier where
   originFormat (Modifier is) = join $ intersperse " " is
 
 instance OriginFormat Statement where
-  originFormat (VarDecl m t n) = originFormat m ++ " " ++ originFormat t ++ " " ++ intersperse ", " n
-  originFormat (VarDeclAndAssign m t n e) = originFormat m ++ " " ++ originFormat t ++ " " ++ (intersperse ", " n) ++ " = "  ++ originFormatList e ";\n"
+  originFormat (VarDecl m t n) = originFormat m ++ " " ++ originFormat t ++ " " ++ (join $ intersperse ", " n) ++ ";"
+  originFormat (VarDeclAndAssign m t n e) = originFormat m ++ " " ++ originFormat t ++ " " ++ (join $ intersperse ", " n) ++ " = "  ++ originFormat e ++ ";"
+  originFormat (VarAssign n e) = n ++ " = " ++ originFormat e ++ ";"
+  originFormat (Exp e) = originFormat e ++ ";"
+  originFormat (Cls c) = originFormat c
 
---                | VarAssign Name Expression
---                | Exp Expression
---                | Cls Class
---   deriving (Eq, Show)
+instance OriginFormat Expression where
+  originFormat (Expression as) = originFormatList as ""
+  originFormat (Lambda args ss) = "(" ++ originFormatList args "," ++ ") => {" ++
+    originFormatList ss "\n" ++ "}"
 
--- data Expression = Expression [Atom]
---                 | Lambda [Arg] [Statement]
---                 deriving (Eq, Show)
+instance OriginFormat Atom where
+  originFormat (Elem name) = name
+  originFormat (MethodCall n e) = n ++ "(" ++ originFormatList e "," ++ ")"
+  originFormat (Op o) = o
+  originFormat (Literal s) = (show s)
+  originFormat (New n e s) = "new " ++ n ++ "(" ++ originFormatList e "," ++ ")" ++ originFormatList s ","
 
--- data Atom = Elem Name
---           | MethodCall Name [Expression]
---           | Op String
---           | Literal String
---           | New Name [Expression] [Statement]
---           deriving (Eq, Show)
+instance OriginFormat String where
+  originFormat = id
