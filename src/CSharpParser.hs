@@ -14,31 +14,16 @@ type Parent = String
 type CParser a = Parsec Input () a
 newtype Modifier = Modifier [Input] deriving (Eq, Show)
 data Package = Package (Maybe Input) Input deriving (Eq, Show)
-
--- instance Show Modifier where
---   show (Modifier is) = join $ intersperse " " is
-
--- instance Show Package where
---   show (Package n) = n
-
 data Using = Using [Package] deriving (Eq, Show)
 data Namespace = Namespace Name [Class] deriving (Eq, Show)
 
--- instance Show Using where
---   show (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ show p ++ ";") packages
-
--- instance Show Namespace where
---   show (Namespace n e) = "namespace " ++ (show n) ++ "\n{\n" ++ show e ++ show "\n}"
-
 data Class = Class Modifier Name [Parent] [Statement] deriving (Eq, Show)
-
--- instance Show Class where
---   show (Class ms n p b) = show ms ++ " " ++ n ++ "\n{\n" ++ (show b) ++ "\n}"
 
 data Statement = VarDecl Modifier Type [Name]
                | VarDeclAndAssign Modifier Type [Name] Expression
                | VarAssign Name Expression
                | Exp Expression
+               | Cls Class
   deriving (Eq, Show)
 
 data Expression = Expression [Atom]
@@ -46,17 +31,18 @@ data Expression = Expression [Atom]
                 deriving (Eq, Show)
 
 data Atom = Elem Name
-          | MethodCall Name Expression
+          | MethodCall Name [Expression]
           | Op String
           | Literal String
+          | New Name [Expression] [Statement]
           deriving (Eq, Show)
 
 data CSharp = CSharp Using Namespace deriving (Eq, Show)
 
 csharpStyle   :: LanguageDef st
 csharpStyle =
-  javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly", "const"]
-            , T.reservedOpNames = ["+", "-", "*", "/"]
+  javaStyle { T.reservedNames = ["using", "class", "public", "private", "var", "namespace", "static", "readonly", "const", "new"]
+            , T.reservedOpNames = ["+", "-", "*", "/", "="]
             }
 
 lexer :: T.TokenParser ()
@@ -92,6 +78,8 @@ operator :: CParser String
 operator = T.operator lexer
 angles :: CParser a -> CParser a
 angles = T.angles lexer
+commaSep :: CParser a -> CParser [a]
+commaSep = T.commaSep lexer
 
 package :: CParser Input
 package = (join . intersperse ".") <$> sepBy1 identifier dot
@@ -109,18 +97,17 @@ namespace = do
   eof
   return $ Namespace n b
 
+className :: CParser Name
+className = (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles identifier)) <?> "expect class"
+
 classP :: CParser Class
 classP = do
   modifier <- many $ choice $ map (\x -> reserved x >> return x) ["public", "private", "static"]
   reserved "class"
   className' <- className
   parents <- option [] (colon >> sepBy1 className comma)
-  statements' <- braces statements
+  statements' <- braces (many (try statement <|> (Cls <$> classP)))
   return $ Class (Modifier modifier) className' parents statements'
-  where
-    className = (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles identifier)) <?> "expect class"
-
--- body = many (noneOf "}")
 
 typeP :: CParser Input
 typeP = try (reserved "var" >> return "var") <|> ((join . intersperse ".") <$> sepBy1 identifier dot) <?> "expect type declare"
@@ -148,33 +135,45 @@ variableAssign = do
   v <- identifier
   _ <- reservedOp "="
   e <- expression
-  _ <- semi
   return $ VarAssign v e
+
+statement :: CParser Statement
+statement = try variableDeclare <|> try (variableAssign <* semi) <|> try variableDeclareAndAssign <|> (Exp <$> expression <* semi) <?> "expect statement"
+
+objectInitilize :: CParser [Statement]
+objectInitilize = commaSep (try variableAssign <|> (Exp <$> expression))
 
 statements :: CParser [Statement]
 statements = many statement
-  where statement = try variableDeclare <|> try variableAssign <|> try variableDeclareAndAssign <|> (Exp <$> expression <* semi) <?> "expect statement"
 
 expression :: CParser Expression
 expression = try lambda <|> Expression <$> sepBy atom operator <?> "expect expression"
 
 atom :: CParser Atom
-atom = try methodCall
+atom = try newInstance
+       <|> try methodCall
        <|> try (charLiteral >>= return . Literal . show)
        <|> try (stringLiteral >>= return . Literal . show)
        <|> try (naturalOrFloat >>= return . Literal . either show show)
        <|> (Elem <$> identifier)
        <?> "expect atom"
+  where newInstance e= do
+          reserved "new"
+          className' <- (className <|> (reserved "[]" >> return "[]"))
+          parameters' <- option [] (parens (commaSep expression))
+          initilize' <- option [] (braces objectInitilize)
+          return $ New className' parameters' initilize'
+
 
 methodCall :: CParser Atom
-methodCall = do i <- identifier
-                p  <- parens expression
+methodCall = do i <- (++) <$> identifier <*> (option "" ((('<':) . (++ ">")) <$> angles identifier)) <?> "expect method"
+                p  <- parens (commaSep expression)
                 return $ MethodCall i p
 
 lambda :: CParser Expression
 lambda = do args' <- args
             _ <- reservedOp "=>"
-            s' <- try (braces statements) <|> statements
+            s' <- try (braces statements) <|> ((:[]) <$> statement)
             return $ Lambda args' s'
   where args :: CParser [Arg]
         args = try (symbol "(" *> symbol ")" *> return [])
@@ -182,6 +181,52 @@ lambda = do args' <- args
                <|> parens (sepBy1 identifier comma)
 
 csharp :: CParser CSharp
-csharp = do using' <- using
+csharp = do using' D<- using
             namespace' <- namespace
             return $ CSharp using' namespace'
+
+originFormatList :: (OriginFormat a) => [a] -> String -> String
+originFormatList xs terminator = (join $ intersperse terminator $ map originFormat xs)
+
+class OriginFormat a where
+  originFormat :: a -> String
+
+instance OriginFormat CSharp where
+  originFormat (CSharp u n) = (originFormat u) ++ "\n" ++ (originFormat n)
+
+instance OriginFormat Using where
+  originFormat (Using packages) = join $ intersperse "\n" $ map (\p -> "using " ++ originFormat p ++ ";") packages
+
+instance OriginFormat Package where
+  originFormat (Package Nothing n) = n
+  originFormat (Package (Just a) n) = a ++ " = " ++ n
+
+instance OriginFormat Namespace where
+  originFormat (Namespace n e) = "namespace " ++ n ++ "\n{\n" ++ originFormatList e "\n" ++ "\n}"
+
+instance OriginFormat Class where
+  originFormat (Class ms n [] b) =  originFormat ms ++ " " ++ n ++ "\n{\n" ++ (originFormatList b "\n") ++ "\n}"
+  originFormat (Class ms n xs b) =  originFormat ms ++ " " ++ n ++ ":" ++ (intersperse ", " xs) ++ "\n{\n" ++ (originFormatList b "\n") ++ "\n}"
+
+instance OriginFormat Modifier where
+  originFormat (Modifier is) = join $ intersperse " " is
+
+instance OriginFormat Statement where
+  originFormat (VarDecl m t n) = originFormat m ++ " " ++ originFormat t ++ " " ++ intersperse ", " n
+  originFormat (VarDeclAndAssign m t n e) = originFormat m ++ " " ++ originFormat t ++ " " ++ (intersperse ", " n) ++ " = "  ++ originFormatList e ";\n"
+
+--                | VarAssign Name Expression
+--                | Exp Expression
+--                | Cls Class
+--   deriving (Eq, Show)
+
+-- data Expression = Expression [Atom]
+--                 | Lambda [Arg] [Statement]
+--                 deriving (Eq, Show)
+
+-- data Atom = Elem Name
+--           | MethodCall Name [Expression]
+--           | Op String
+--           | Literal String
+--           | New Name [Expression] [Statement]
+--           deriving (Eq, Show)

@@ -47,6 +47,8 @@ main = hspec $ do
     it "should parse class with parent generic type" $ do
       (classP, "class ClassA : Parent<Controller>{}") `shouldSuccess` Class (Modifier []) "ClassA" ["Parent<Controller>"] []
 
+    it "should parse nest class" $ do
+      (classP, "class Outer{ class Inner{}}") `shouldSuccess` Class (Modifier []) "Outer" [] [Cls (Class (Modifier []) "Inner" [] [])]
     it "should fail when no word 'class'" $ do
       parse classP "" "private A{}" `shouldSatisfy` isFailure
     it "should fail when no braces" $ do
@@ -89,10 +91,8 @@ main = hspec $ do
   describe "parse variable assign" $ do
     it "should parse value assign" $ do
       parse variableAssign "" "a = 3;" `shouldBe` Right (VarAssign "a" (Expression [Literal "3"]))
-    it "should fail when no semi" $ do
-      parse variableAssign "" "a = 1" `shouldSatisfy` isFailure
     it "temporary not support multiple '='" $ do
-      parse variableAssign "" "a = b = 3" `shouldSatisfy` isFailure
+      parse (variableAssign >> eof) "" "a = b = 3" `shouldSatisfy` isFailure
 
   describe "parse statements" $ do
     it "should support empty statements" $ do
@@ -101,20 +101,20 @@ main = hspec $ do
       parse statements "" "int a; a = 1; int b = 2;Console.WriteLine();var c = () => {};" `shouldBe` Right ([VarDecl (Modifier []) "int" ["a"]
                                                                                                             , VarAssign "a" (Expression [Literal "1"])
                                                                                                             , VarDeclAndAssign (Modifier []) "int" ["b"] (Expression [Literal "2"])
-                                                                                                           , Exp (Expression [Elem "Console", MethodCall "WriteLine" (Expression [])])
+                                                                                                           , Exp (Expression [Elem "Console", MethodCall "WriteLine" [Expression []]])
                                                                                                            , VarDeclAndAssign (Modifier []) "var" ["c"] (Lambda [] [])])
     it "should fail when miss semi" $ do
       parse statements "" "Console.WriteLine" `shouldSatisfy` isFailure
 
   describe "parse expression" $ do
     it "should parse directy method call" $ do
-      parse expression "" "MethodA()" `shouldBe` Right (Expression [MethodCall "MethodA" (Expression [])])
+      parse expression "" "MethodA()" `shouldBe` Right (Expression [MethodCall "MethodA" [Expression []]])
     it "should parse multiple level method call" $ do
-      parse expression "" "instanceA.MethodB().MethodC(instanceB)" `shouldBe` Right (Expression [Elem "instanceA", MethodCall "MethodB" (Expression []), MethodCall "MethodC" (Expression [Elem "instanceB"])])
+      parse expression "" "instanceA.MethodB().MethodC(instanceB)" `shouldBe` Right (Expression [Elem "instanceA", MethodCall "MethodB" [Expression []], MethodCall "MethodC" [Expression [Elem "instanceB"]]])
 
   describe "parse atom" $ do
     it "should parse method" $ do
-      parse atom "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" (Expression []))
+      parse atom "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" [Expression []])
     it "should parse char literal" $ do
       parse atom "" "'a'" `shouldBe` Right (Literal "'a'")
     it "should parse string literal" $ do
@@ -127,14 +127,21 @@ main = hspec $ do
       parse (atom >> eof) "" "1l" `shouldSatisfy` isFailure
     it "should parse identifier" $ do
       parse atom "" "Date" `shouldBe` Right (Elem "Date")
+    it "should parse new instance" $ do
+      (atom, "new List<int>(2){11,12};") `shouldSuccess` New "List<int>" [Expression [Literal "2"]] [Exp (Expression [Literal "11"]), Exp (Expression [Literal "12"])]
+    it "should parse new array" $ do
+      (atom, "new [] {1}") `shouldSuccess` New "[]" [] [Exp (Expression [Literal "1"])]
+
 
   describe "parse method call" $ do
     it "should parse without parameter" $ do
-      parse methodCall "" "MethodA()" `shouldBe` Right (MethodCall "MethodA" (Expression []))
-    it "should parse with parameter" $ do
-      parse methodCall "" "MethodB(3)" `shouldBe` Right (MethodCall "MethodB" (Expression [Literal "3"]))
+      (methodCall, "MethodA()") `shouldSuccess` MethodCall "MethodA" [Expression []]
+    it "should parse with single parameter" $ do
+      (methodCall, "MethodB(3)") `shouldSuccess`  MethodCall "MethodB" [Expression [Literal "3"]]
+    it "should parse with mutiple parameters" $ do
+      (methodCall, "MethodB(3, () => {})") `shouldSuccess` MethodCall "MethodB" [Expression [Literal "3"], Lambda [] []]
     it "should parse with generic" $ do
-      (methodCall, "MethodA<Generic>()") `shouldSuccess` (MethodCall "MethodA" (Just "Generic") (Expression []))
+      (methodCall, "MethodA<Generic>()") `shouldSuccess` MethodCall "MethodA<Generic>" [Expression []]
 
   describe "parse lambda" $ do
     it "should parse no argument and no body lambda" $ do
