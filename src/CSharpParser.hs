@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 module CSharpParser (fullPackageOrClassIdentifier, using, namespace, classP, typeP, variableDeclare, variableDeclareAndAssign, variableAssign, statements, expression, methodCall, atom, lambda, Package (..), Using (..), Namespace (..), Class (..), Modifier (..), Statement (..), Expression(..), Atom(..), CParser) where
 
-import           Control.Monad        (join)
+import           Control.Monad        (join, liftM2)
 import           Data.List (intersperse, intercalate)
 import           Text.Parsec
 import           Text.Parsec.Language (LanguageDef, javaStyle)
@@ -27,6 +27,7 @@ data Statement = VarDecl Modifier Type [Name]
                | VarAssign Name Expression
                | Exp Expression
                | Cls Class
+               | UsingSyntax [Statement] [Statement]
   deriving (Eq, Show)
 
 data Expression = Atoms [Atom]
@@ -35,10 +36,11 @@ data Expression = Atoms [Atom]
 
 data Atom = Elem Name
           | MethodCall Name [Expression]
+          | ArrayAccess Name [[Atom]]
           | Op String
           | Literal String
           | New Name [Expression] [Statement]
-          | Parens Atom
+          | Parens [Atom]
           deriving (Eq, Show)
 
 data CSharp = CSharp Using Namespace deriving (Eq, Show)
@@ -84,6 +86,10 @@ angles :: CParser a -> CParser a
 angles = T.angles lexer
 commaSep :: CParser a -> CParser [a]
 commaSep = T.commaSep lexer
+commaSep1 :: CParser a -> CParser [a]
+commaSep1 = T.commaSep lexer
+brackets :: CParser a -> CParser a
+brackets = T.brackets lexer
 
 fullPackageOrClassIdentifier :: CParser Name
 fullPackageOrClassIdentifier = intercalate "." <$> sepBy1 identifier dot
@@ -143,16 +149,20 @@ variableAssign = do
 statement :: CParser Statement
 statement = try variableDeclareAndAssign <|> try variableDeclare <|> try variableAssign <|> (Exp <$> expression) <?> "expect statement"
 
+usingSyntax :: CParser Statement
+usingSyntax =  reserved "using" *> liftM2 UsingSyntax (parens (commaSep1 statement)) (braces statements)
+
 statements :: CParser [Statement]
-statements = endBy statement semi
+statements = many ((statement <* semi) <|> usingSyntax)
 
 expression :: CParser Expression
 expression = try lambda <|> Atoms <$> many1 atom <?> "expect expression"
 
 atom :: CParser Atom
-atom = Parens <$> parens atom
+atom = Parens <$> parens (many1 atom)
        <|> try newInstance
        <|> try methodCall
+       <|> try arrayAccess
        <|> try (charLiteral >>= return . Literal . show)
        <|> try (stringLiteral >>= return . Literal . show)
        <|> try (naturalOrFloat >>= return . Literal . either show show)
@@ -166,6 +176,7 @@ atom = Parens <$> parens atom
           initilize' <- option [] (braces objectInitilize)
           return $ New className' parameters' initilize'
         objectInitilize = commaSep (try variableAssign <|> (Exp <$> expression))
+        arrayAccess = liftM2 ArrayAccess className (many1 (brackets (commaSep1 atom)))
 
 methodCall :: CParser Atom
 methodCall = do i <- (++) <$> identifier <*> option "" ((('<':) . (++ ">")) <$> angles fullPackageOrClassIdentifier) <?> "expect method"
@@ -219,6 +230,7 @@ instance OriginFormat Statement where
   originFormat (VarAssign n e) = n ++ " = " ++ originFormat e ++ ";"
   originFormat (Exp e) = originFormat e ++ ";"
   originFormat (Cls c) = originFormat c
+  originFormat (UsingSyntax xs ys) = "using (" ++ originFormatList xs "," ++ ") {" ++ originFormatList ys ";" ++ "}"
 
 instance OriginFormat Expression where
   originFormat (Atoms as) = originFormatList as ""
@@ -231,7 +243,8 @@ instance OriginFormat Atom where
   originFormat (Op o) = o
   originFormat (Literal s) = (show s)
   originFormat (New n e s) = "new " ++ n ++ "(" ++ originFormatList e "," ++ ")" ++ originFormatList s ","
-  originFormat (Parens a) = "(" ++ originFormat a ++ ")"
+  originFormat (Parens as) = "(" ++ originFormatList as "" ++ ")"
+  originFormat (ArrayAccess n ix) = n ++ (intercalate "" (join $ fmap (fmap originFormat) ix))
 
 instance OriginFormat String where
   originFormat = id

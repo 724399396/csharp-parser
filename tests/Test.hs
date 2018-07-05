@@ -98,6 +98,9 @@ main = hspec $ do
                                                                                                             , VarDeclAndAssign (Modifier []) "int" ["b"] (Atoms [Literal "2"])
                                                                                                            , Exp (Atoms [Elem "Console", Op ".", MethodCall "WriteLine" []])
                                                                                                            , VarDeclAndAssign (Modifier []) "var" ["c"] (Lambda [] [])])
+    it "should parse using syntax" $ do
+      (statements, "using (var package = new ExcelPackage(Response.Content.ReadAsStreamAsync().Result)){}") `shouldSuccess` [UsingSyntax [VarDeclAndAssign (Modifier []) "var" ["package"] (Atoms [New "ExcelPackage" [Atoms [Elem "Response",Op ".",Elem "Content",Op ".",MethodCall "ReadAsStreamAsync" [],Op ".",Elem "Result"]] []])] []]
+
     it "should fail when miss semi" $ do
       parse statements "" "Console.WriteLine" `shouldSatisfy` isFailure
 
@@ -107,8 +110,9 @@ main = hspec $ do
     it "should parse multiple level method call" $ do
       parse expression "" "instanceA.MethodB().MethodC(instanceB)" `shouldBe` Right (Atoms [Elem "instanceA", Op ".", MethodCall "MethodB" [], Op ".", MethodCall "MethodC" [Atoms [Elem "instanceB"]]])
     it "should parse cast variable" $ do
-      (expression, "(int)someValue") `shouldSuccess` (Atoms [Parens (Elem "int"), Elem "someValue"])
-
+      (expression, "(int)someValue") `shouldSuccess` (Atoms [Parens [(Elem "int")], Elem "someValue"])
+    it "should parse priority parens nest" $ do
+      (expression, "((A.B).C)") `shouldSuccess` (Atoms [Parens [Parens [Elem "A", Op ".", Elem "B"], Op ".", Elem "C"]])
 
   describe "parse atom" $ do
     it "should parse method" $ do
@@ -130,7 +134,9 @@ main = hspec $ do
     it "should parse new array" $ do
       (atom, "new [] {1}") `shouldSuccess` New "[]" [] [Exp (Atoms [Literal "1"])]
     it "should parse parens nest variable" $ do
-      (atom, "(dto)") `shouldSuccess` (Parens (Elem "dto"))
+      (atom, "(dto)") `shouldSuccess` (Parens [Elem "dto"])
+    it "should parse array access" $ do
+      (atom, "Cells[1, 1]") `shouldSuccess` (ArrayAccess "Cells" [[Literal "1", Literal "1"]])
 
 
   describe "parse method call" $ do
